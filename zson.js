@@ -147,10 +147,42 @@ Encoder.prototype.encodeArray = function encodeArray(src) {
 };
 
 Encoder.prototype.encodeObject = function encodeObject(src) {
-	this.push(0xfe);
 	if (typeof src === "function") {
+		this.push(0xfe);
 		src(); // callback style
+	} else if (src instanceof Int8Array ||
+			   src instanceof Uint8Array ||
+			   src instanceof Uint8ClampedArray ||
+			   src instanceof Int16Array ||
+			   src instanceof Uint16Array ||
+			   src instanceof Float32Array ||
+			   src instanceof Float64Array) {
+		this.push(0xf6);
+		if (src instanceof Int8Array) {
+			this.push(1);
+		} else if (src instanceof Uint8Array) {
+			this.push(2);
+		} else if (src instanceof Uint8ClampedArray) {
+			this.push(3);
+		} else if (src instanceof Int16Array) {
+			this.push(4);
+		} else if (src instanceof Uint16Array) {
+			this.push(5);
+		} else if (src instanceof Float32Array) {
+			this.push(8);
+		} else if (src instanceof Float64Array) {
+			this.push(9);
+		}
+		this.encodeInt(src.length);
+		var view = new DataView(src.buffer);
+		var size = src.BYTES_PER_ELEMENT * src.length;
+		for (var i = 0; i != size; ++i) {
+			this.push(view.getUint8(i));
+		}
+		process.stderr.write("length:" + src.length + "\n");
+		process.stderr.write("size:" + size + "\n");
 	} else {
+		this.push(0xfe);
 		for (var k in src) {
 			if (src.hasOwnProperty(k)) {
 				this.encodeKeyValue(k, src[k]);
@@ -261,6 +293,8 @@ Decoder.prototype.decodeCore = function () {
 				return false;
 			case 0xf5:
 				return true;
+			case 0xf6:
+				return this._decodeTypedArray();
 			case 0xfc:
 				return this._decodeString();
 			case 0xfd:
@@ -298,6 +332,46 @@ Decoder.prototype._decodeArray = function decodeArray() {
 		ret.push(this.decode());
 	}
 	this.shift();
+	return ret;
+};
+
+Decoder.prototype._decodeTypedArray = function decodeTypedArray() {
+	var t = this.shift();
+	var length = this.decode();
+	var ret;
+	switch (t) {
+	case 1:
+		ret = new Int8Array(length);
+		break;
+	case 2:
+		ret = new Uint8Array(length);
+		break;
+	case 3:
+		ret = new Uint8ClampedArray(length);
+		break;
+	case 4:
+		ret = new Int16Array(length);
+		break;
+	case 5:
+		ret = new Uint16Array(length);
+		break;
+	case 8:
+		ret = new Float32Array(length);
+		break;
+	case 9:
+		ret = new Float64Array(length);
+		break;
+	default:
+		throw new Error("unexpected TypeArray type:" + t);
+	}
+	var view = new DataView(ret.buffer);
+	var size = length * ret.BYTES_PER_ELEMENT;
+	for (var i = 0; i != size; ++i) {
+		view.setUint8(i, this.shift());
+	}
+	if (this.shift() !== 0xff) {
+		throw new Error("unexpected");
+	}
 	return ret;
 };
 
